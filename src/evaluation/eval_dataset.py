@@ -7,13 +7,14 @@ Each question contains:
 - pages: PDF pages containing supporting evidence
 """
 
-from typing import TypedDict
+from typing import TypedDict, NotRequired
 
 
 class EvaluationItem(TypedDict):
     question: str
     answer: str
     pages: list[int]
+    evidence_answers: NotRequired[list[str]]
 
 
 EVALUATION_DATASET: list[EvaluationItem] = [
@@ -59,17 +60,17 @@ EVALUATION_DATASET: list[EvaluationItem] = [
     },
     {
         "question": "What was Reliance Industries Limited's net worth in FY 2024-25?",
-        "answer": "₹7,42,922 crore",
+        "answer": "₹7,95,069 crore",
         "pages": [5],
     },
     {
         "question": "What was Reliance Industries Limited's total assets in FY 2024-25?",
-        "answer": "₹17,55,986 crore",
+        "answer": "₹19,50,121 crore",
         "pages": [5],
     },
     {
         "question": "What was Reliance Industries Limited's market capitalisation in FY 2024-25?",
-        "answer": "₹20,14,011 crore",
+        "answer": "₹17,25,378 crore",
         "pages": [5],
     },
     {
@@ -90,6 +91,7 @@ EVALUATION_DATASET: list[EvaluationItem] = [
     {
         "question": "How much did consolidated revenue increase from FY 2023-24 to FY 2024-25?",
         "answer": "₹71,052 crore",
+        "evidence_answers": ["10,71,174", "10,00,122"],
         "pages": [5, 100],
     },
     {
@@ -104,17 +106,17 @@ EVALUATION_DATASET: list[EvaluationItem] = [
     },
     {
         "question": "What was Reliance Industries Limited's EBDIT in FY 2024-25?",
-        "answer": "₹1,78,290 crore",
+        "answer": "₹1,83,422 crore",
         "pages": [5],
     },
     {
         "question": "What was depreciation and amortisation in FY 2024-25?",
-        "answer": "₹50,832 crore",
+        "answer": "₹53,136 crore",
         "pages": [5],
     },
     {
         "question": "What was the equity share capital in FY 2024-25?",
-        "answer": "₹6,766 crore",
+        "answer": "₹13,532 crore",
         "pages": [5],
     },
 ]

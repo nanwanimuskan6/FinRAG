@@ -12,6 +12,14 @@ from src.retrieval.build_embeddings import DEFAULT_OUTPUT_PATH
 
 
 _TOKEN_PATTERN = re.compile(r"\b\w+\b")
+_SPELLING_VARIANTS = {
+    "amortization": "amortisation",
+    "capitalization": "capitalisation",
+}
+_QUERY_FILLER_TOKENS = {
+    "a", "an", "and", "did", "for", "from", "how", "in", "is", "it",
+    "limited", "of", "reliance", "the", "to", "was", "what", "with", "year",
+}
 
 
 class BM25RetrievalResult(TypedDict):
@@ -26,7 +34,28 @@ class BM25RetrievalResult(TypedDict):
 
 def tokenize(text: str) -> list[str]:
     """Lowercase and tokenize text consistently for BM25 indexing and queries."""
-    return _TOKEN_PATTERN.findall(text.lower())
+    return [_SPELLING_VARIANTS.get(token, token)
+            for token in _TOKEN_PATTERN.findall(text.lower())]
+
+
+def financial_metric_phrases(query: str) -> list[str]:
+    """Return meaningful two- and three-word metric phrases from a query.
+
+    Annual reports contain broad company and year terms in many locations. The
+    named metric (for example, ``equity share capital``) is a far better lexical
+    signal for finding its actual statement row.
+    """
+    tokens = [
+        token for token in tokenize(query)
+        if token not in _QUERY_FILLER_TOKENS and token != "fy" and not token.isdigit()
+    ]
+    phrases: list[str] = []
+    for length in (3, 2):
+        for start in range(len(tokens) - length + 1):
+            phrase = " ".join(tokens[start : start + length])
+            if phrase not in phrases:
+                phrases.append(phrase)
+    return phrases
 
 
 class BM25Retriever:
@@ -61,6 +90,9 @@ class BM25Retriever:
         self.k1 = k1
         self.b = b
         self._term_frequencies = [Counter(tokenize(str(text))) for text in self._texts]
+        # Match whole metric phrases across PDF whitespace and punctuation.
+        self._phrase_texts = [" " + " ".join(tokenize(str(text))) + " "
+                              for text in self._texts]
         self._document_lengths = np.asarray(
             [sum(frequencies.values()) for frequencies in self._term_frequencies],
             dtype=np.float64,
@@ -93,6 +125,10 @@ class BM25Retriever:
         if self.count == 0:
             return []
 
+        # Keep metric and year signals from being swamped by question filler.
+        # Retain the original terms for queries consisting only of filler.
+        query_tokens = [token for token in query_tokens
+                        if token not in _QUERY_FILLER_TOKENS] or query_tokens
         scores = np.zeros(self.count, dtype=np.float64)
         for token in set(query_tokens):
             document_frequency = self._document_frequencies.get(token, 0)
@@ -115,6 +151,15 @@ class BM25Retriever:
                 scores[index] += inverse_document_frequency * (
                     term_frequency * (self.k1 + 1) / denominator
                 )
+
+        # BM25 treats words independently. Add a modest boost when a chunk
+        # contains the exact multi-word metric the user named, which is common
+        # in financial statements and avoids rewarding generic report pages.
+        metric_phrases = financial_metric_phrases(query)
+        for index, text_lower in enumerate(self._phrase_texts):
+            for phrase in metric_phrases:
+                if " " + phrase + " " in text_lower:
+                    scores[index] += 2.0 * len(phrase.split())
 
         artifact_indices = np.arange(self.count)
         ranked_indices = np.lexsort((artifact_indices, -scores))

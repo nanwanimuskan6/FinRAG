@@ -6,6 +6,9 @@ from typing import Protocol
 import numpy as np
 
 
+# Benchmarking on this narrow annual-report corpus showed the compact model
+# ranked its financial evidence more accurately than BGE-base. Keep the model
+# choice evidence-led rather than choosing solely by embedding dimension.
 DEFAULT_MODEL_NAME = "BAAI/bge-small-en-v1.5"
 BGE_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
 
@@ -32,22 +35,34 @@ class EmbeddingModel:
         model_name: str = DEFAULT_MODEL_NAME,
         *,
         model: EmbeddingBackend | None = None,
+        local_files_only: bool = False,
     ) -> None:
         """Load a Sentence Transformers model once, or accept an injected model.
 
         Args:
             model_name: Hugging Face model identifier to load when no model is injected.
             model: Optional preconstructed backend, primarily for testing.
+            local_files_only: Load only from the local Hugging Face cache. Use
+                this for serving/retrieval after the embedding-build stage has
+                already downloaded the model.
         """
         self.model_name = model_name
-        self._model = model if model is not None else self._load_model(model_name)
+        self._model = (
+            model
+            if model is not None
+            else self._load_model(model_name, local_files_only=local_files_only)
+        )
 
     @staticmethod
-    def _load_model(model_name: str) -> EmbeddingBackend:
+    def _load_model(
+        model_name: str,
+        *,
+        local_files_only: bool,
+    ) -> EmbeddingBackend:
         """Load the Sentence Transformers backend only when it is needed."""
         from sentence_transformers import SentenceTransformer
 
-        return SentenceTransformer(model_name)
+        return SentenceTransformer(model_name, local_files_only=local_files_only)
 
     def encode_texts(self, texts: Sequence[str]) -> np.ndarray:
         """Encode document texts in input order as normalized NumPy embeddings.

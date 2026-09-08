@@ -107,10 +107,18 @@ def build_vector_store(
     artifact_path: str | Path = DEFAULT_OUTPUT_PATH,
     database_path: str | Path = DEFAULT_CHROMA_PATH,
     collection_name: str = DEFAULT_COLLECTION_NAME,
+    *,
+    rebuild: bool = False,
 ) -> VectorStoreBuildSummary:
-    """Load a saved artifact and insert its aligned records into ChromaDB."""
+    """Load a saved artifact and insert its aligned records into ChromaDB.
+
+    Set ``rebuild`` only when deliberately replacing the named collection with
+    chunks from a newly generated embedding artifact.
+    """
     embeddings, chunks = load_embedding_artifact(artifact_path)
     store = ChromaVectorStore(database_path, collection_name)
+    if rebuild:
+        store.reset()
     store.add_chunks(chunks, embeddings)
 
     source_filename = chunks[0]["source_filename"] if chunks else ""
@@ -132,11 +140,16 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("artifact_path", nargs="?", type=Path, default=DEFAULT_OUTPUT_PATH)
     parser.add_argument("--database-path", type=Path, default=DEFAULT_CHROMA_PATH)
     parser.add_argument("--collection", default=DEFAULT_COLLECTION_NAME)
+    parser.add_argument(
+        "--rebuild",
+        action="store_true",
+        help="replace the named collection with the supplied embedding artifact",
+    )
     args = parser.parse_args(arguments)
 
     try:
         summary = build_vector_store(
-            args.artifact_path, args.database_path, args.collection
+            args.artifact_path, args.database_path, args.collection, rebuild=args.rebuild
         )
     except (FileNotFoundError, ValueError) as error:
         print(f"Error: {error}", file=sys.stderr)

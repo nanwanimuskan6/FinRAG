@@ -38,3 +38,6 @@ checkpoints/
 *.hdf5
 *.pt
 *.pth
+
+# Test runtime files
+.pytest-tmp/

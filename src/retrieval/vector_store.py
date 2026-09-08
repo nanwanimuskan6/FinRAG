@@ -52,6 +52,19 @@ class ChromaVectorStore:
         """Return the number of stored chunk documents."""
         return int(self._collection.count())
 
+    def reset(self) -> None:
+        """Delete and recreate this collection for an explicit index rebuild.
+
+        Call this only after a source PDF, chunking strategy, or embedding model
+        has changed. It affects only ``self.collection_name`` in this database.
+        """
+        self._client.delete_collection(self.collection_name)
+        self._collection = self._client.get_or_create_collection(
+            name=self.collection_name,
+            metadata={"hnsw:space": "cosine"},
+            embedding_function=None,
+        )
+
     def add_chunks(
         self, chunks: Sequence[PDFChunkRecord], embeddings: np.ndarray
     ) -> None:

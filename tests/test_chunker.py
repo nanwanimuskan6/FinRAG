@@ -89,3 +89,26 @@ def test_multiple_pages_are_not_mixed() -> None:
     assert second_page_chunks
     assert all("SECOND_PAGE_TOKEN" not in chunk["text"] for chunk in first_page_chunks)
     assert all("FIRST_PAGE_TOKEN" not in chunk["text"] for chunk in second_page_chunks)
+
+
+def test_detected_table_data_uses_compact_row_preserving_chunks() -> None:
+    table_rows = "\n".join(
+        f"Metric {index} | {index * 100} crore"
+        for index in range(40)
+    )
+    chunks = chunk_pages(
+        [
+            {
+                "page_number": 1,
+                "text": "Narrative overview.\n\n[TABLE DATA]\n" + table_rows,
+                "source_filename": "report.pdf",
+            }
+        ],
+        chunk_size=1000,
+        chunk_overlap=150,
+    )
+
+    table_chunks = [chunk for chunk in chunks if "Metric 39" in chunk["text"]]
+    assert table_chunks
+    assert all(len(chunk["text"]) <= 500 for chunk in table_chunks)
+    assert all("[TABLE DATA]" not in chunk["text"] for chunk in chunks)

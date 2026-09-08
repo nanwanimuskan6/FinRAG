@@ -66,6 +66,15 @@ def test_duplicate_ids_are_rejected_clearly(tmp_path: Path) -> None:
         store.add_chunks(chunks, embeddings)
 
 
+def test_reset_replaces_only_the_selected_collection(tmp_path: Path) -> None:
+    store = ChromaVectorStore(tmp_path / "chroma_db", "rebuild_chunks")
+    store.add_chunks(_sample_chunks(), _sample_embeddings())
+
+    store.reset()
+
+    assert store.count() == 0
+
+
 def test_invalid_embedding_shapes_are_rejected(tmp_path: Path) -> None:
     """One-dimensional embeddings cannot be added to the collection."""
     store = ChromaVectorStore(tmp_path / "chroma_db", "invalid_shape_chunks")

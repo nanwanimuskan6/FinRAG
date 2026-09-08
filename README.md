@@ -1,94 +1,65 @@
 # FinRAG
 
-## PDF ingestion
+A financial-document RAG project that retrieves evidence from annual-report PDFs with source-page citations. Built with pretrained models; currently a terminal app, evaluated on Reliance Industries' FY 2024-25 report.
 
-`src/ingestion/pdf_loader.py` provides `load_pdf(pdf_path)`, a reusable
-PyMuPDF-based loader. It returns one structured record per PDF page with the
-one-based page number, extracted text, and source filename. Empty pages are
-retained with an empty text value so that page metadata is never lost.
+## How it works
 
-The component deliberately only performs PDF text extraction; it does not yet
-chunk documents, create embeddings, retrieve content, or call an LLM.
+PDF extraction and chunking -> BGE embeddings -> ChromaDB + BM25 search -> rank fusion -> financial-aware BGE reranking -> cited evidence for Gemini.
 
-### Manual ingestion
+- Preserves page numbers and source text.
+- Prioritizes relevant metric/value rows and reduces report-footer noise.
+- Checks generated numbers against retrieved evidence.
 
-To inspect a PDF manually, place it in `data/raw/` and run:
+**Stack:** Python, PyMuPDF, Sentence Transformers, ChromaDB, PyTorch, Google GenAI.
 
-```powershell
-python -m src.ingestion.run_ingestion data/raw/<filename>.pdf
-```
+## Results
 
-The command prints the total page count plus the source filename, page number,
-and first 500 characters extracted from the first page.
+Measured on a **20-question development benchmark**:
 
-### Inspect selected pages
+| Metric | Result |
+|---|---:|
+| Evidence hit rate @1 | **75%** |
+| Evidence hit rate @5 | **90%** |
+| Evidence hit rate @10 | **95%** |
+| MRR @10 (answer matching) | **0.785** |
+| Tests passing | **74** |
 
-To preview extraction quality on pages 2, 10, 50, and 100, run:
+Top-1 evidence coverage improved from 50% to 75%. These are retrieval results on a small development set, not independent-test or generated-answer accuracy. Precision and F1 have not been measured.
 
-```powershell
-python -m src.ingestion.inspect_pages data/raw/<filename>.pdf
-```
+## Run locally
 
-Pages that are outside the PDF's page range are skipped with a message.
-
-## Conservative text cleaning
-
-`src/ingestion/text_cleaner.py` normalizes line endings, repeated horizontal
-whitespace, excessive blank lines, and page-boundary whitespace. It preserves
-the original line order, page metadata, words, and financial values; it does
-not infer, summarize, or restructure extracted content.
-
-## Smart chunking
-
-`src/ingestion/chunker.py` converts cleaned page records into deterministic,
-page-isolated chunks. It targets 1,000 characters with 150 characters of
-overlap, preferring paragraph boundaries, then line or whitespace boundaries.
-Oversized paragraphs are safely split at the target length; every chunk keeps
-its original page number and source filename.
-
-### Inspect chunks
-
-To inspect chunk statistics and representative chunks from a PDF, run:
+Use Python 3.11+ in a virtual environment. From the project root:
 
 ```powershell
-python -m src.ingestion.inspect_chunks data/raw/<filename>.pdf
+python -m pip install -r requirements.txt
 ```
 
-## Embeddings
-
-`src/retrieval/embedder.py` uses Sentence Transformers with
-`BAAI/bge-small-en-v1.5` to encode document chunks and user queries as dense
-vectors. This compact retrieval model uses raw chunk text for documents and
-the BGE retrieval instruction for queries, helping align queries with relevant
-financial-report passages while keeping the model reusable in memory.
-
-### Build real report embeddings
-
-`src/retrieval/build_embeddings.py` runs the existing PDF loading, cleaning,
-and page-isolated chunking pipeline, then saves normalized BGE embeddings and
-aligned chunk metadata in `data/processed/ril_embeddings.npz`.
+Place the report at `data/raw/RIL_Annual_Report_2024_25.pdf`, then build the index and download the reranker once:
 
 ```powershell
-python -m src.retrieval.build_embeddings data/raw/RIL_Annual_Report_2024_25.pdf
+python -m src.retrieval.build_embeddings
+python -m src.retrieval.build_vector_store --rebuild
+python -c "from src.retrieval.reranker import Reranker; Reranker(local_files_only=False)"
 ```
 
-## Persistent vector storage
+The first setup downloads pretrained models. `--rebuild` replaces the named FinRAG collection. PDFs, indexes, and model files are excluded from Git.
 
-FinRAG stores the pipeline output as: PDF chunks → BGE embeddings → a persistent
-ChromaDB collection. `src/retrieval/build_vector_store.py` loads the saved NPZ
-artifact without regenerating embeddings and writes the chunk text plus page and
-source metadata to `data/processed/chroma_db/` for later semantic retrieval.
+For interactive answers, set your own Gemini API key in the same terminal:
 
-## Dense retrieval
+```powershell
+$env:GEMINI_API_KEY = "your_api_key"
+python -m app.rag_app
+```
 
-`src/retrieval/dense_retriever.py` encodes a user question with BGE and compares
-its normalized vector to every saved document embedding using a dot product.
-The highest cosine-similarity scores identify the most relevant report chunks,
-while preserving each chunk's page and source metadata.
+Example: *What was Reliance's net worth in FY 2024-25?*
 
-## Hybrid retrieval
+Gemini answer generation is implemented but has not been evaluated end to end. A key is required for answers; retrieval evaluation runs locally without one. Numeric checks alone cannot verify the metric, year, or scope, and may reject calculated values.
 
-`src/retrieval/bm25_retriever.py` adds deterministic BM25 keyword retrieval over
-the same saved chunks used by dense retrieval. `src/retrieval/hybrid_retriever.py`
-combines dense and BM25 rank lists with Reciprocal Rank Fusion (RRF), preserving
-chunk provenance and returning both component scores alongside the fused score.
+## Evaluate
+
+```powershell
+python -m src.evaluation.evaluate_retrieval
+python -m pytest -q
+```
+
+Metrics are saved to `data/processed/retrieval_metrics.json`. Use `--skip-rerank` for a hybrid-only evaluation.

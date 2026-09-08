@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.retrieval.dense_retriever import DenseRetriever
+from src.retrieval.dense_retriever import ChromaDenseRetriever, DenseRetriever
 
 
 class FakeQueryEmbedder:
@@ -74,3 +74,40 @@ def test_retrieve_rejects_empty_queries_and_invalid_top_k(tmp_path: Path) -> Non
         retriever.retrieve("   ")
     with pytest.raises(ValueError, match="top_k must be at least one"):
         retriever.retrieve("revenue", top_k=0)
+
+
+class FakeVectorStore:
+    def count(self) -> int:
+        return 1
+
+    def query(self, embedding: np.ndarray, top_k: int) -> list[dict[str, object]]:
+        assert embedding.tolist() == [1.0, 0.0]
+        assert top_k == 1
+        return [
+            {
+                "chunk_id": "chunk_a",
+                "text": "Revenue grew.",
+                "page_number": 10,
+                "source_filename": "report.pdf",
+                "distance": 0.2,
+            }
+        ]
+
+
+def test_chroma_dense_retriever_preserves_provenance_and_converts_distance() -> None:
+    retriever = ChromaDenseRetriever(
+        embedder=FakeQueryEmbedder(np.array([1.0, 0.0], dtype=np.float32)),
+        vector_store=FakeVectorStore(),  # type: ignore[arg-type]
+    )
+
+    result = retriever.retrieve("revenue", top_k=1)
+
+    assert result == [
+        {
+            "chunk_id": "chunk_a",
+            "text": "Revenue grew.",
+            "page_number": 10,
+            "source_filename": "report.pdf",
+            "similarity_score": pytest.approx(0.8),
+        }
+    ]

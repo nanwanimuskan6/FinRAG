@@ -8,6 +8,11 @@ import numpy as np
 
 from src.retrieval.build_embeddings import DEFAULT_OUTPUT_PATH
 from src.retrieval.embedder import EmbeddingModel
+from src.retrieval.vector_store import (
+    DEFAULT_CHROMA_PATH,
+    DEFAULT_COLLECTION_NAME,
+    ChromaVectorStore,
+)
 
 
 class QueryEmbedder(Protocol):
@@ -53,7 +58,9 @@ class DenseRetriever:
             self._source_filenames,
             self._texts,
         ) = self._load_artifact(self.artifact_path)
-        self._embedder = embedder if embedder is not None else EmbeddingModel()
+        self._embedder = (
+            embedder if embedder is not None else EmbeddingModel(local_files_only=True)
+        )
 
     @property
     def count(self) -> int:
@@ -148,3 +155,60 @@ class DenseRetriever:
                 raise ValueError(f"number of embeddings must equal number of {name}")
 
         return embeddings, chunk_ids, page_numbers, source_filenames, texts
+
+
+class ChromaDenseRetriever:
+    """Dense retrieval backed by the persistent Chroma vector database.
+
+    It uses the same BGE query encoder as the embedding pipeline, so Chroma's
+    cosine-distance search is compatible with the vectors already persisted by
+    :mod:`src.retrieval.build_vector_store`.
+    """
+
+    def __init__(
+        self,
+        database_path: str | Path = DEFAULT_CHROMA_PATH,
+        collection_name: str = DEFAULT_COLLECTION_NAME,
+        *,
+        embedder: QueryEmbedder | None = None,
+        vector_store: ChromaVectorStore | None = None,
+    ) -> None:
+        self._embedder = (
+            embedder if embedder is not None else EmbeddingModel(local_files_only=True)
+        )
+        self._store = (
+            vector_store
+            if vector_store is not None
+            else ChromaVectorStore(database_path, collection_name)
+        )
+
+    @property
+    def count(self) -> int:
+        """Return the number of chunks indexed in Chroma."""
+        return self._store.count()
+
+    def retrieve(self, query: str, top_k: int = 5) -> list[DenseRetrievalResult]:
+        """Retrieve the nearest stored chunks and convert distance to similarity."""
+        if not query.strip():
+            raise ValueError("query must not be empty")
+        if top_k < 1:
+            raise ValueError("top_k must be at least one")
+        if self.count == 0:
+            return []
+
+        query_embedding = np.asarray(self._embedder.encode_query(query), dtype=np.float32)
+        if query_embedding.ndim != 1 or query_embedding.size == 0:
+            raise ValueError("query embedding must be a non-empty one-dimensional vector")
+        if not np.isfinite(query_embedding).all():
+            raise ValueError("query embedding must contain only finite values")
+
+        return [
+            DenseRetrievalResult(
+                chunk_id=result["chunk_id"],
+                text=result["text"],
+                page_number=result["page_number"],
+                source_filename=result["source_filename"],
+                similarity_score=1.0 - result["distance"],
+            )
+            for result in self._store.query(query_embedding, top_k)
+        ]

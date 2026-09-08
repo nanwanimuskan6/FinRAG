@@ -50,52 +50,60 @@ def chunk_pages(
 
         source_stem = _source_stem(page["source_filename"])
 
-        # Split text into chunks
-        start = 0
         chunk_number = 1
 
-        while start < len(text):
-
-            end = min(start + chunk_size, len(text))
-
-            if end < len(text):
-
-                newline = text.rfind("\n", start + chunk_size // 2, end)
-
-                if newline != -1:
-                    end = newline + 1
-                else:
-
-                    space = text.rfind(" ", start + chunk_size // 2, end)
-
-                    if space != -1:
-                        end = space + 1
-
-            chunk_text = text[start:end].strip()
-
-            if chunk_text:
-
-                chunks.append(
-                    PDFChunkRecord(
-                        chunk_id=(
-                            f"{source_stem}_"
-                            f"p{page['page_number']}_"
-                            f"c{chunk_number:02d}"
-                        ),
-                        text=chunk_text,
-                        page_number=page["page_number"],
-                        source_filename=page["source_filename"],
-                    )
+        # Table detector output is intentionally separated from narrative text.
+        # Financial table rows often contain the exact metric/value pair, so
+        # smaller row-preserving chunks are much easier to retrieve than a
+        # mixed multi-column page extraction.
+        narrative, marker, table_data = text.partition("\n\n[TABLE DATA]\n")
+        sections = [(narrative, chunk_size, chunk_overlap)]
+        if marker and table_data.strip():
+            sections.append(
+                (
+                    table_data,
+                    min(chunk_size, 500),
+                    min(chunk_overlap, 100),
                 )
-
-                chunk_number += 1
-
-            if end >= len(text):
-                break
-
-            start = max(
-                end - chunk_overlap,
-                start + 1,
             )
+
+        for section_text, section_size, section_overlap in sections:
+            start = 0
+            while start < len(section_text):
+                end = min(start + section_size, len(section_text))
+
+                if end < len(section_text):
+                    newline = section_text.rfind("\n", start + section_size // 2, end)
+                    if newline != -1:
+                        end = newline + 1
+                    else:
+                        space = section_text.rfind(" ", start + section_size // 2, end)
+                        if space != -1:
+                            end = space + 1
+
+                # Preserve the source characters exactly. Stripping individual
+                # chunks would remove a boundary space and make the promised
+                # character overlap smaller than ``chunk_overlap``.
+                chunk_text = section_text[start:end]
+
+                if chunk_text.strip():
+                    chunks.append(
+                        PDFChunkRecord(
+                            chunk_id=(
+                                f"{source_stem}_"
+                                f"p{page['page_number']}_"
+                                f"c{chunk_number:02d}"
+                            ),
+                            text=chunk_text,
+                            page_number=page["page_number"],
+                            source_filename=page["source_filename"],
+                        )
+                    )
+                    chunk_number += 1
+
+                if end >= len(section_text):
+                    break
+
+                start = max(end - section_overlap, start + 1)
 
     return chunks
